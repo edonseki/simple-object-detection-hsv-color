@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            background-color: #f5f5f5;
+        }
+
+        .range-group {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .range-label {
+            font-size: 18px;
+            color: #333;
+            width: 150px;
+            margin: 10px;
+            text-align: right;
+        }
+
+        input[type="range"] {
+            width: 200px;
+            margin: 10px;
+        }
+
+        #minHSV,
+        #maxHSV {
+            font-size: 18px;
+            color: #777;
+            margin: 10px;
+            width: 300px;
+            text-align: center;
+        }
+
+        canvas {
+            margin: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="range-group">
+        <label class="range-label">Hue (min):</label>
+        <input type="range" min="0" max="360" value="0" id="minHue">
+    </div>
+    <div class="range-group">
+        <label class="range-label">Saturation (min):</label>
+        <input type="range" min="0" max="100" value="0" id="minSaturation">
+    </div>
+    <div class="range-group">
+        <label class="range-label">Value (min):</label>
+        <input type="range" min="0" max="100" value="0" id="minValue">
+    </div>
+    <div class="range-group">
+        <label class="range-label">Hue (max):</label>
+        <input type="range" min="0" max="360" value="360" id="maxHue">
+    </div>
+    <div class="range-group">
+        <label class="range-label">Saturation (max):</label>
+        <input type="range" min="0" max="100" value="100" id="maxSaturation">
+    </div>
+    <div class="range-group">
+        <label class="range-label">Value (max):</label>
+        <input type="range" min="0" max="100" value="100" id="maxValue">
+    </div>
+    <div class="range-group">
+        <label id="minHSV"></label>
+        <label id="maxHSV"></label>
+    </div>
+    <div class="range-group">
+        <canvas id="cameraOutput"></canvas>
+        <canvas id="maskedCameraOutput"></canvas>
+    </div>
+
+    <script>
+        // Get the camera output canvas element
+        const cameraOutput = document.getElementById('cameraOutput');
+        const context = cameraOutput.getContext('2d');
+
+        // Get the masked camera output canvas element
+        const maskedCameraOutput = document.getElementById('maskedCameraOutput');
+        const maskContext = maskedCameraOutput.getContext('2d');
+
+        let intervalId;
+
+        navigator.mediaDevices.getUserMedia({
+                video: true
+            })
+            .then(stream => {
+                const video = document.createElement("video");
+                video.srcObject = stream;
+                video.play();
+                video.addEventListener("play", function() {
+                    intervalId = setInterval(() => {
+                        context.drawImage(video, 0, 0, cameraOutput.width, cameraOutput.height);
+                        applyMask();
+                    }, 16);
+                });
+            })
+            .catch(err => {
+                console.error(`Error: ${err}`);
+            });
+
+        // Function to apply the mask to the second canvas
+        function applyMask() {
+            const minHue = parseFloat(document.getElementById('minHue').value);
+            const maxHue = parseFloat(document.getElementById('maxHue').value);
+            const minSaturation = parseFloat(document.getElementById('minSaturation').value);
+            const maxSaturation = parseFloat(document.getElementById('maxSaturation').value);
+            const minValue = parseFloat(document.getElementById('minValue').value);
+            const maxValue = parseFloat(document.getElementById('maxValue').value);
+
+            document.getElementById("minHSV").innerHTML = "Min HSV: " + minHue + "," + minSaturation + "," + minValue;
+            document.getElementById("maxHSV").innerHTML = "Max HSV: " + maxHue + "," + maxSaturation + "," + maxValue;
+
+            const imageData = context.getImageData(0, 0, cameraOutput.width, cameraOutput.height);
+            const pixelData = imageData.data;
+
+            for (let i = 0; i < pixelData.length; i += 4) {
+                const hsv = rgbToHsv(pixelData[i], pixelData[i + 1], pixelData[i + 2]);
+                const hue = hsv[0],
+                    saturation = hsv[1],
+                    value = hsv[2];
+                if (hue < minHue || hue > maxHue || saturation < minSaturation || saturation > maxSaturation || value < minValue || value > maxValue) {
+                    // Set the pixel to transparent
+                    pixelData[i + 3] = 0;
+                }
+            }
+
+            maskContext.putImageData(imageData, 0, 0);
+        }
+
+        // Call the applyMask function whenever the min or max HSV values change
+        document.getElementById('minHue').addEventListener('change', applyMask);
+        document.getElementById('maxHue').addEventListener('change', applyMask);
+        document.getElementById('minSaturation').addEventListener('change', applyMask);
+        document.getElementById('maxSaturation').addEventListener('change', applyMask);
+        document.getElementById('minValue').addEventListener('change', applyMask);
+        document.getElementById('maxValue').addEventListener('change', applyMask);
+
+        // Function to convert RGB values to HSV
+        function rgbToHsv(r, g, b) {
+            r /= 255;
+            g /= 255;
+            b /= 255;
+
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            let h, s, v = max;
+
+            const d = max - min;
+            s = max == 0 ? 0 : d / max;
+
+            if (max == min) {
+                h = 0; // achromatic
+            } else {
+                switch (max) {
+                    case r:
+                        h = (g - b) / d + (g < b ? 6 : 0);
+                        break;
+                    case g:
+                        h = (b - r) / d + 2;
+                        break;
+                    case b:
+                        h = (r - g) / d + 4;
+                        break;
+                }
+
+                h /= 6;
+            }
+
+            return [h * 360, s * 100, v * 100];
+        }
+
+        //Stop the interval when the user leaves the page or closes the tab/window
+        window.onbeforeunload = function() {
+            clearInterval(intervalId);
+        }
+    </script>
+</body>
+
+</html>
